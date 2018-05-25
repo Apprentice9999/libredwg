@@ -619,8 +619,12 @@ read_system_page(Bit_Chain* dat, int64_t size_comp, int64_t size_uncomp,
   bit_read_fixed(dat, rsdata, page_size);
   pedata = decode_rs(rsdata, block_count, 239);
 
-  if (size_comp < size_uncomp)
-    (void)decompress_r2007(data, size_uncomp, pedata, size_comp);
+  if (size_comp < size_uncomp) {
+    dat->chain = pedata;
+    dat->size = page_size;
+    (void)decompress_R2004_section(dat, data, size_comp);
+    //decompress_r2007(data, size_uncomp, pedata, size_comp);
+  }
   else
     memcpy(data, pedata, size_uncomp);
   free(pedata);
