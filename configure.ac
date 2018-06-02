@@ -245,9 +245,12 @@ if test x$enable_python != xfalse -a x$cross_compiling = xno; then
     if test -n "$SWIG"; then
       AM_PATH_PYTHON([2.7])
       SWIG_PYTHON
+      AM_CONDITIONAL([HAVE_SWIG], [1])
+
+      AC_PROG_CXX
+      AX_COMPILER_FLAGS_CXXFLAGS
+      dnl SWIG_MULTI_MODULE_SUPPORT
     fi
-    dnl AX_SWIG_ENABLE_CXX
-    dnl SWIG_MULTI_MODULE_SUPPORT
 else
     if test x$enable_python = xfalse; then AC_MSG_RESULT([yes (swig disabled)])
     else AC_MSG_WARN([disabled swig bindings: cross-compiled])
@@ -285,6 +288,7 @@ AC_CONFIG_FILES([
 	examples/Makefile
 	bindings/Makefile
 	bindings/python/Makefile
+	bindings/cxx/Makefile
 	test/Makefile
 	test/testcases/Makefile
 	test/xmlsuite/Makefile
