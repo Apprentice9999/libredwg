@@ -18,6 +18,7 @@
 #include "../src/config.h"
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 // strings.h or string.h
 #ifdef AX_STRCASECMP_HEADER
 # include AX_STRCASECMP_HEADER
@@ -160,17 +161,20 @@ main(int argc, char *argv[])
   //allow stdin, but require -I|--format then
   memset(&dwg, 0, sizeof(Dwg_Data));
   dwg.opts = opts;
-  if (infile)
+  if (infile) {
+    struct stat attrib;
+    stat(infile, &attrib);
     dat.fh = fopen(infile, "r");
+    dat.size = attrib.st_size;
+  }
   else
     dat.fh = stdin;
 
-  /*if ((fmt && !strcasecmp(fmt, "json")) ||
-        (infline && !strcasecmp(infile, ".json")))
+  if ((fmt && !strcasecmp(fmt, "json")) ||
+      (infile && !strcasecmp(infile, ".json")))
     error = dwg_read_json(&dat, &dwg);
-  else */
-  if ((fmt && !strcasecmp(fmt, "dxfb")) ||
-      (infile && !strcasecmp(infile, ".dxfb")))
+  else if ((fmt && !strcasecmp(fmt, "dxfb")) ||
+           (infile && !strcasecmp(infile, ".dxfb")))
     error = dwg_read_dxfb(&dat, &dwg);
   else if ((fmt && !strcasecmp(fmt, "dxf")) ||
            (infile && !strcasecmp(infile, ".dxf")))
@@ -188,6 +192,11 @@ main(int argc, char *argv[])
   }
   if (argc)
     fclose(dat.fh);
+  if (error)
+    {
+      fprintf(stderr, "Invalid input (DWG_ERR %d)\n", error);
+      exit(1);
+    }
 
   if (dwg.header.from_version != dwg.header.version)
     dwg.header.from_version = dwg.header.version;

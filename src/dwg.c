@@ -79,7 +79,7 @@ static int dat_read_file (Bit_Chain *restrict dat, FILE *restrict fp,
   return 0;
 }
 
-static int dat_read_stream (Bit_Chain *restrict dat, FILE *restrict fp)
+int dat_read_stream (Bit_Chain *restrict dat, FILE *restrict fp)
 {
   size_t size = 0;
 

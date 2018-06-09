@@ -19,6 +19,7 @@
 
 lib_LTLIBRARIES = libredwg.la
 AM_CFLAGS = -I$(top_srcdir)/include -I. $(WARN_CFLAGS)
+libredwg_la_LDFLAGS = -version-info 0:0:0 -no-undefined -lm
 
 libredwg_la_SOURCES = \
 	dwg.c \
@@ -36,16 +37,18 @@ libredwg_la_SOURCES = \
         hash.c \
 	dwg_api.c \
 	$(EXTRA_HEADERS)
+#       out_xml.c
+#       out_yaml.c
 if USE_WRITE
 libredwg_la_SOURCES += \
 	encode.c \
 	in_dxf.c \
-	in_dxfb.c
+	in_dxfb.c \
+	in_json.c
 #       encode_r2007.c \
-#       in_json.c
+#       in_xml.c
+#       in_yaml.c
 endif
-
-libredwg_la_LDFLAGS = -version-info 0:0:0 -no-undefined -lm
 
 EXTRA_HEADERS = \
 	dwg.spec \
