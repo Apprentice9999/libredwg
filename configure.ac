@@ -9,7 +9,7 @@ dnl You should have received a copy of the GNU General Public License
 dnl along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 AC_PREREQ([2.61])
-AC_INIT([LibreDWG],[0.4-dev],[libredwg@gnu.org],,
+AC_INIT([LibreDWG],[0.4.900],[libredwg@gnu.org],,
         [https://savannah.gnu.org/projects/libredwg/])
 AC_CONFIG_AUX_DIR([build-aux])
 dnl for older systems use this:
@@ -42,7 +42,28 @@ dnl Checks for libraries
 AC_CHECK_LIB([ps],[PS_open_file],
   libredwg_have_libps=yes,
   libredwg_have_libps=no)
+AM_CONDITIONAL([HAVE_LIBPS],[test yes = "$libredwg_have_libps" &&
+                             test yes = "$ac_cv_header_libps_pslib_h"])
 
+dnl `pcre2-config --libs8`
+AC_CHECK_LIB([pcre2-8],[pcre2_config_8],
+  [libredwg_have_libpcre2=yes; PCRE2_LIBS=-lpcre2-8],
+  [if pkg-config --exists libpcre2; then
+    libredwg_have_libpcre2=yes;
+    PCRE2_CFLAGS=`pkg-config libpcre2 --cflags`
+    PCRE2_LIBS=`pkg-config libpcre2 --libs`
+  else
+    AC_MSG_WARN([libpcre2 for dwggrep not found])
+  fi])
+AC_CHECK_LIB([pcre2-16],[pcre2_config_16],
+  [libredwg_have_libpcre2_16=yes])
+if test yes = "$libredwg_have_libpcre2_16"; then
+  AC_DEFINE([HAVE_PCRE2_16],1,[Define to 1 if -lpcre2-16 is used also])
+  PCRE2_LIBS="$PCRE2_LIBS -lpcre2-16"
+fi
+AC_SUBST([PCRE2_CFLAGS])
+AC_SUBST([PCRE2_LIBS])
+  
 dnl PKG_CHECK_MODULES([LIBXML2], [libxml-2.0], [],
 dnl    AC_MSG_ERROR([Install libxml-2.0 first]))
 if pkg-config --exists libxml-2.0; then
@@ -69,6 +90,11 @@ AM_CONDITIONAL([HAVE_DEJAGNU], [test x$ac_cv_header_dejagnu_h = xyes])
 # Don't bother testing for libps headers if libps is not available.
 if test yes = "$libredwg_have_libps" ; then
   AC_CHECK_HEADERS([libps/pslib.h])
+fi
+if test yes = "$libredwg_have_libpcre2"; then
+  AC_CHECK_HEADERS([pcre2.h],[],[],[#define PCRE2_CODE_UNIT_WIDTH 8])
+else
+  AC_MSG_WARN([Couldn't find pcre2.h. No regex support in dwggrep])
 fi
 
 dnl Checks for typedefs, structures, and compiler characteristics
@@ -143,11 +169,13 @@ AC_FUNC_MALLOC
 AC_FUNC_REALLOC
 AC_FUNC_STAT
 AC_CHECK_FUNC([strdup],[],
-  AC_MSG_ERROR([strdup not found. check your _POSIX_C_SOURCE vs ANSI settings.]))
+  AC_MSG_ERROR([strdup not found. Check your _POSIX_C_SOURCE vs ANSI settings.]))
 AC_CHECK_FUNCS([getopt_long],[],
   AC_MSG_WARN([getopt_long not found. programs will not accept long options.]))
 AC_CHECK_FUNCS([basename],[],
   AC_MSG_WARN([basename not found. The default outfile will be unexpected.]))
+AC_CHECK_FUNCS([strcasestr],[],
+  AC_MSG_WARN([strcasestr not found. Using a slower workaround.]))
 
 dnl Feature: --disable-write
 AC_MSG_CHECKING([--disable-write])
@@ -207,9 +235,6 @@ else
 	AC_MSG_RESULT([no (default)])
 fi
 AM_CONDITIONAL(ENABLE_GCOV, test "x$enable_gcov" = "xtrue")
-
-AM_CONDITIONAL([HAVE_LIBPS],[test yes = "$libredwg_have_libps" &&
-                             test yes = "$ac_cv_header_libps_pslib_h"])
 
 dnl Check for mingw, cross and wine
 AM_CONDITIONAL([HAVE_MINGW], [test "x$host_os" = "xmingw32"])

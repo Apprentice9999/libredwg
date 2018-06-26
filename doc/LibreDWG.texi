@@ -127,7 +127,7 @@ Here is a list of features that are still missing.
 @item Reading pre-R13 DWG
 Reading DWG formats for pre-R13 and some R2010+ non-graphical objects is an ongoing effort, some minor parts are missing. Simple DWG's can be read already, some undocumented classes are skipped.
 
-* ACIS: only converted to a raw string
+* ACIS: version 1 is converted to a raw string. ACIS version 2, i.e. the forked variant ACIS 7.0 under the name ShapeManager, is not yet supported.
 
 @item Writing pre-R13 and R2004+ DWG
 Writing DWG formats for R2004 and later: R2007, R2010, R2013, R2018 is an
@@ -138,7 +138,7 @@ DXF support is an ongoing effort, and about halfway implemented.
 Ascii DXF's are generated fully, with much more elements and fields and other free libraries,
 but AutoCAD fails to import some of them. See the @file{TODO} file for a detailled coverage report.
 
-Writing binary DXF is still under construction, done about 50%.
+Writing binary DXF is still under construction, done about 80%.
 Reading DXF is not yet fully implemented, this is under construction.
 
 @item Enabled entities and objects, but untested:
@@ -398,42 +398,35 @@ via two ways:
 
 1. by using the @file{dwg.h} data structures. Via @code{dwg->object[0]}, which is of
    type @code{Dwg_Object_BLOCK_CONTROL},
-   and a custom @code{void process_BLOCK_HEADER((Dwg_Object_Ref* ref)}:
+   and a custom @code{void process_BLOCK_HEADER(Dwg_Object_Ref* ref)}:
 
 @verbatim
-  Dwg_Object_BLOCK_CONTROL* block_control
-    = dwg->object[0]->tio.object->tio.BLOCK_CONTROL;
-
-  // optional
+  Dwg_Object_BLOCK_CONTROL* block_control = dwg->block_control;
+  //first all objects in the model space
+  process_BLOCK_HEADER(dwg->header_vars.BLOCK_RECORD_MSPACE);
+  //then all objects in the blocks
   for (i=0; i < block_control->num_entries; i++)
     {
       process_BLOCK_HEADER(block_control->block_headers[i]);
     }
-
-  process_BLOCK_HEADER(block_control->model_space);
-  process_BLOCK_HEADER(block_control->paper_space);
+  //and last all objects in the paper space
+  process_BLOCK_HEADER(dwg->header_vars.BLOCK_RECORD_PSPACE);
 @end verbatim
 
 or 2. by using the API functions from @file{dwg_api.h}:
 
 @verbatim
-  int error;
-  dwg_obj_block_control *ctrl = &dwg->block_control;
-
-  dwg_object_ref **hdr_refs
-    = dwg_obj_block_control_get_block_headers(ctrl, &error);
-  long num_hdr_objs = dwg_obj_block_control_get_num_entries(ctrl, &error);
-  for (i=0; i < num_hdr_objs; i++)
+  Dwg_Object_BLOCK_CONTROL* block_control = dwg_block_control(dwg);
+  process_BLOCK_HEADER(dwg_model_space_ref(dwg));
+  for (i=0; i < block_control->num_entries; i++)
     {
-      process_BLOCK_HEADER(hdr_refs[i]);
+      process_BLOCK_HEADER(block_control->block_headers[i]);
     }
-
-  process_BLOCK_HEADER(dwg_obj_block_control_get_model_space(ctrl, &error));
-  process_BLOCK_HEADER(dwg_obj_block_control_get_paper_space(ctrl, &error));
+  process_BLOCK_HEADER(dwg_paper_space_ref(dwg));
 @end verbatim
 
 and inside the @code{process_BLOCK_HEADER} function, you iterate over the objects
-from the header ref via:
+from the block_header via:
 
 @verbatim
   Dwg_Object* obj = get_first_owned_object(ref->obj);
@@ -446,6 +439,11 @@ from the header ref via:
 
 where @code{process_object} checks the type of each object or entity under the
 @var{Dwg_Object* obj}.
+
+The decoder is driven by the fields definition in the @file{dwg.spec}, which adds each field to the object. This is done in the @file{decode.c} or @file{decode_r2007.c}.
+@deftypefn {Function} int dwg_decode_OBJECT (Bit_Chain *@var{dat}, Dwg_Object *@var{obj})
+Sets the fields for the object from the DWG bitstream.
+@end deftypefn
 
 @node Encoding
 @section Encoding
@@ -466,7 +464,7 @@ Return 0 if successful.
 @end deftypefn
 
 @deftypefn {Function} int dwg_add_object (Dwg_Data *@var{dwg})
-Adds a new uninitialized object to the @var{dwg->object[]} array.
+Adds a new uninitialized object to the @var{dwg->object}[] array.
 Return 0 or -1 if successful, otherwise DWG_ERR_OUTOFMEM. -1 is the array was re-allocated.
 @end deftypefn
 
@@ -479,7 +477,7 @@ This does not initialize the @var{obj} size, type, address, handlestream_size, b
 The encoder is driven by the fields definition in the @file{dwg.spec}, which adds each field to
 the object. This is done by @file{encode} or any @file{in_*} import module.
 @deftypefn {Function} int dwg_encode_OBJECT (Bit_Chain *@var{dat}, Dwg_Object *@var{obj})
-Sets the fields for the object from the encoded bitstream.
+Encodes the DWG bitstream from the fields of the object.
 @end deftypefn
 
 The iterator is similar to above, but you want to encode all data
@@ -508,7 +506,7 @@ or from an earlier or later DWG version.
 
 We can write Ascii DXF files in various versions, with much more data than other free
 DWG libraries, but not as stable as the unfree Teigha library yet.
-AutoCAD fails to import our files still.
+AutoCAD fails to import some of our files still (~20% failure rate).
 
 Options: @code{--minimal} (see @code{dwg2dxf} or @code{dwgread}) creates
 only a short header with a ACADVER and HANDSEED element, and the
@@ -530,7 +528,9 @@ Reading DXFB is under construction.
 
 @cindex JSON
 
-We write and read to our own JSON format, which is a readable 1:1 mapping of the DWG structures, and carries much more information than the DXF format.
+We write and read to our own JSON format, which is a readable 1:1
+mapping of the DWG structures, and carries much more information than
+the DXF format.
 
 Writing a JSON to stdout is not recommended, as then ending commas are
 still there, which is strictly not valid JSON.
@@ -553,26 +553,40 @@ This is about 70% finished. Check the covered entity types.
 LibreDWG is mostly a library, and as such collects error codes from
 the highest level function down to the lowest level functions.
 The error codes are sorted by severity, and only if the error exceeds
-DWG_ERR_CRITICAL, i.e. DWG_ERR_CLASSESNOTFOUND, processing is stopped.
+@var{DWG_ERR_CRITICAL}, i.e. @code{DWG_ERR_CLASSESNOTFOUND}, processing is stopped.
 
 All error bitmasks are collected during read or write and returned at the end.
 
-@table @asis
-@item DWG_ERR_WRONGCRC          1
-@item DWG_ERR_NOTYETSUPPORTED   2
-@item DWG_ERR_UNHANDLEDCLASS    4
-@item DWG_ERR_INVALIDTYPE       8
-@item DWG_ERR_INVALIDHANDLE     16
-@item DWG_ERR_INVALIDEED        32
-@item DWG_ERR_VALUEOUTOFBOUNDS  64
-@item DWG_ERR_CLASSESNOTFOUND   128 = DWG_ERR_CRITICAL
-@item DWG_ERR_SECTIONNOTFOUND   256
-@item DWG_ERR_PAGENOTFOUND      512
-@item DWG_ERR_INTERNALERROR     1024
-@item DWG_ERR_INVALIDDWG        2048
-@item DWG_ERR_IOERROR           4096
-@item DWG_ERR_OUTOFMEM          8192
-@end table
+@vtable @code
+@item DWG_ERR_WRONGCRC
+1
+@item DWG_ERR_NOTYETSUPPORTED
+2
+@item DWG_ERR_UNHANDLEDCLASS
+4
+@item DWG_ERR_INVALIDTYPE
+8
+@item DWG_ERR_INVALIDHANDLE
+16
+@item DWG_ERR_INVALIDEED
+32
+@item DWG_ERR_VALUEOUTOFBOUNDS
+64
+@item DWG_ERR_CLASSESNOTFOUND
+128 = @code{DWG_ERR_CRITICAL}
+@item DWG_ERR_SECTIONNOTFOUND
+256
+@item DWG_ERR_PAGENOTFOUND
+512
+@item DWG_ERR_INTERNALERROR
+1024
+@item DWG_ERR_INVALIDDWG
+2048
+@item DWG_ERR_IOERROR
+4096
+@item DWG_ERR_OUTOFMEM
+8192
+@end vtable
 
 Additionally, verbose warning and error messages are printed to stderr.
 
@@ -635,6 +649,17 @@ Prints all layers in a DWG.
 With @code{-f} or @code{--flags} also the status of frown, on/off and locked.
 With @code{--on} only the visible layers, which are on and not frozen.
 
+@item @file{dwggrep}
+@cindex dwggrep
+
+Search regex pattern in all text values in a list of DWGs. The order of options is still important.
+With @code{-i} searches case-insensitive.
+With @code{-c} prints only the count of found texts.
+With @code{-h} or @code{--no-filename} does not print the filename.
+With @code{--type NAME} search only NAME entities or objects.
+With @code{--dxf NUM} search only in DXF group NUM fields.
+With @code{--text} searches only TEXT-like entities: TEXT, MTEXT, ATTRIB, ATTDEF.
+
 @item @file{dwg2SVG}
 @cindex dwg2SVG
 Convert a DWG to a limited SVG. All paperspace and modelspace enties of type:
@@ -644,11 +669,12 @@ TEXT, LINE, CIRCLE, ARC, INSERT.
 @cindex dwg2ps
 Convert a DWG to a very limited Postscript file. All paperspace and modelspace enties of type LINE.
 
-Noe that the graphical representation for PS and SVG output is severely lacking, block references (insert entities) are not yet exploded, UCS and paper space transformations per entity are not yet done.
+This requires installation of pslib @uref{http://pslib.sourceforge.net/doc/pslib.html}.
+
+Note that the graphical representation for PS and SVG output is severely lacking, block references (insert entities) are not yet exploded, UCS and paper space transformations per entity are not yet done.
 
 @item @file{dwg2dxf}
 @cindex dwg2dxf
-
 Converts DWG files to DXF, optionally via @code{--as-rNNNN} as another
 version, an earlier or later version, or via @code{-m} or
 @code{--minimal} as a minimal DXF version, skipping most headers vars,
@@ -660,27 +686,31 @@ The DXF files are created in the current directory and silently overwritten.
 
 @item @file{dxf2dwg}
 @cindex dxf2dwg
-
 Convert a DXF (or Binary DXF) to DWG, optionally via @code{--as-rVER} as another
 version, an earlier or later version.
 The DXF reader is not yet implemented.
-
-@item @file{dwggrep}
-@cindex dwggrep
-
-Searches DWG files for a text string, via regular expressions.
-This feature is under construction.
 
 @end table
 
 There are also some more examples in the source distribution:
 
-@file{load_dwg} loads a DWG and adds some entities.
-@cindex load_dwg
+@table @asis
 
-@file{dwg2svg2} converts a DWG to SVG similar to @file{dwg2SVG},
-but via the @file{dwg_api.h} only. The graphical representation for PS and SVG output is severely lacking, block references (insert entities) are not yet exploded , UCS and paper space transformations per entity are not yet done.
+@item @file{load_dwg}
+@cindex load_dwg
+loads a DWG and adds some entities.
+
+@item @file{dwg2svg2}
 @cindex dwg2svg2
+converts a DWG to SVG similar to @file{dwg2SVG},
+but via the @file{dwg_api.h} only. The graphical representation for PS and SVG output is severely lacking, block references (insert entities) are not yet exploded , UCS and paper space transformations per entity are not yet done.
+
+@item @file{unknown}
+@cindex unknown
+lists the not yet reverse-engineered blobs from our example files, and
+is the framework to guess the field layout for these.
+
+@end table
 
 @node Bindings
 @chapter Bindings
@@ -689,9 +719,9 @@ but via the @file{dwg_api.h} only. The graphical representation for PS and SVG o
 @cindex perl
 
 LibreDWG generates library bindings to python and perl5 via
-swig. These can be quite huge.  You can easily add bindings to other
-swig-supported languages, like Go, C#, ruby, php, D, lua, tcl, common
-lisp, ocaml, or others by yourself. Patches accepted.
+swig. These can be quite huge, and it is recommended to use @file{ccache}.
+You can easily add bindings to other swig-supported languages, like Go, C#,
+ruby, php, D, lua, tcl, common lisp, ocaml, or others by yourself. Patches accepted.
 
 @node Reference API
 @chapter Reference API
