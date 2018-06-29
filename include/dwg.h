@@ -454,7 +454,8 @@ typedef struct _dwg_color /* CmColor: R15 and earlier */
   unsigned char flag;    /* 1: name follows, 2: book name follows */
   char* name;
   char* book_name;
-  unsigned char transparency_type; /* 0 BYLAYER, 1 BYBLOCK, 3 alpha in the last byte */
+  unsigned char transparency_type; /* 0 BYLAYER, 1 BYBLOCK, 3 alpha */
+  unsigned char alpha;
 } Dwg_Color;
 
 /**
@@ -1018,8 +1019,8 @@ typedef struct _dwg_entity_MINSERT
   BITCODE_B         has_attribs;
   BITCODE_BL        num_owned;
 
-  BITCODE_BS        numcols;
-  BITCODE_BS        numrows;
+  BITCODE_BS        num_cols;
+  BITCODE_BS        num_rows;
   BITCODE_BD        col_spacing;
   BITCODE_BD        row_spacing;
 
@@ -1165,9 +1166,9 @@ typedef struct _dwg_entity_LINE
     BITCODE_3BD extrusion; \
     BITCODE_2RD text_midpt; \
     BITCODE_BD elevation; \
-    BITCODE_RC flags_1; \
+    BITCODE_RC flag1; \
     BITCODE_TV user_text; \
-    BITCODE_BD text_rot; \
+    BITCODE_BD text_rotation; \
     BITCODE_BD horiz_dir; \
     BITCODE_3BD ins_scale; \
     BITCODE_BD ins_rotation; \
@@ -1194,7 +1195,7 @@ typedef struct _dwg_entity_DIMENSION_ORDINATE
   BITCODE_3BD ucsorigin_pt;
   BITCODE_3BD feature_location_pt;
   BITCODE_3BD leader_endpt;
-  BITCODE_RC flags_2;
+  BITCODE_RC flag2;
   BITCODE_H dimstyle;
   BITCODE_H block;
 } Dwg_Entity_DIMENSION_ORDINATE;
@@ -1208,8 +1209,8 @@ typedef struct _dwg_entity_DIMENSION_LINEAR
   BITCODE_3BD _13_pt;
   BITCODE_3BD _14_pt;
   BITCODE_3BD def_pt;
-  BITCODE_BD ext_line_rot;
-  BITCODE_BD dim_rot;
+  BITCODE_BD ext_line_rotation;
+  BITCODE_BD dim_rotation;
   BITCODE_H dimstyle;
   BITCODE_H block;
 } Dwg_Entity_DIMENSION_LINEAR;
@@ -1223,7 +1224,7 @@ typedef struct _dwg_entity_DIMENSION_ALIGNED
   BITCODE_3BD _13_pt;
   BITCODE_3BD _14_pt;
   BITCODE_3BD def_pt;
-  BITCODE_BD ext_line_rot;
+  BITCODE_BD ext_line_rotation;
   BITCODE_H dimstyle;
   BITCODE_H block;
 } Dwg_Entity_DIMENSION_ALIGNED;
@@ -2678,7 +2679,7 @@ typedef struct _dwg_MLeaderAnnotContext
   BITCODE_BD landing_gap;
   BITCODE_BS text_left;
   BITCODE_BS text_right;
-  BITCODE_BS text_align;
+  BITCODE_BS text_alignment;
   BITCODE_BS attach_type;
 
   BITCODE_B has_text_content;
@@ -2695,7 +2696,7 @@ typedef struct _dwg_MLeaderAnnotContext
       BITCODE_BD line_spacing_factor;
       BITCODE_BS line_spacing_style;
       BITCODE_CMC color;
-      BITCODE_BS align;
+      BITCODE_BS alignment;
       BITCODE_BS flow;
       BITCODE_CMC bg_color;
       BITCODE_BD bg_scale;
@@ -2773,7 +2774,7 @@ typedef struct _dwg_object_MULTILEADER
   BITCODE_BL num_blocklabels;
   Dwg_Leader_BlockLabel *blocklabels;
   BITCODE_B neg_textdir;
-  BITCODE_BS ipe_align;
+  BITCODE_BS ipe_alignment;
   BITCODE_BS justification;
   BITCODE_BD scale_factor;
   
@@ -3058,9 +3059,9 @@ typedef struct _dwg_entity_TABLE
   BITCODE_CMC title_row_fill_color;  /*!< DXF 63 */
   BITCODE_CMC header_row_fill_color; /*!< DXF 63 */
   BITCODE_CMC data_row_fill_color;   /*!< DXF 63 */
-  BITCODE_BS title_row_align;   /*!< DXF 170 */
-  BITCODE_BS header_row_align;  /*!< DXF 170 */
-  BITCODE_BS data_row_align;    /*!< DXF 170 */
+  BITCODE_BS title_row_alignment;   /*!< DXF 170 */
+  BITCODE_BS header_row_alignment;  /*!< DXF 170 */
+  BITCODE_BS data_row_alignment;    /*!< DXF 170 */
   BITCODE_H title_text_style;   /*!< DXF 7 */
   BITCODE_H header_text_style;  /*!< DXF 7 */
   BITCODE_H data_text_style;    /*!< DXF 7 */
@@ -3180,7 +3181,7 @@ typedef struct _dwg_ContentFormat
   BITCODE_TV value_format_string;
   BITCODE_BD rotation;
   BITCODE_BD block_scale;
-  BITCODE_BL cell_align;
+  BITCODE_BL cell_alignment;
   BITCODE_CMC content_color;
   BITCODE_H text_style;
   BITCODE_BD text_height;
@@ -3526,7 +3527,7 @@ typedef struct _dwg_object_FIELD
   BITCODE_TV evaluation_error_msg;  /* 300 */
   Dwg_TABLE_value value;
   BITCODE_TV value_string;        /* 301,9 */
-  BITCODE_TV value_string_length; /* 98 */
+  BITCODE_BL value_string_length; /* 98 ODA bug: TV */
   BITCODE_BL num_childval;      /* 93 */
   Dwg_FIELD_ChildValue *childval;
 
@@ -4498,9 +4499,9 @@ typedef struct _dwg_object_entity
   BITCODE_BB entity_mode;
   BITCODE_BL num_reactors;
   BITCODE_B xdic_missing_flag;  /*!< r2004+ */
-  BITCODE_B has_ds_binary_data; /*!< r2013+ */
   BITCODE_B isbylayerlt;        /*!< r13-r14 */
-  BITCODE_B nolinks;
+  BITCODE_B nolinks;            /*!< r13-r2000 */
+  BITCODE_B has_ds_binary_data; /*!< r2013+ */
   BITCODE_CMC color;
   BITCODE_BD linetype_scale;
   BITCODE_BB linetype_flags;    /*!< r2000+ */

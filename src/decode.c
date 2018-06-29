@@ -69,9 +69,9 @@ decode_preR13_section_ptr(const char* name, Dwg_Section_Type_r11 id,
 static void
 decode_preR13_section_chk(Dwg_Section_Type_r11 id, Bit_Chain* dat,
                           Dwg_Data * dwg);
-static void
+static int
 decode_preR13_section(Dwg_Section_Type_r11 id, Bit_Chain* dat, Dwg_Data * dwg);
-static void
+static int
 decode_preR13_entities(unsigned long start, unsigned long end, unsigned long offset,
                        Bit_Chain* dat, Dwg_Data * dwg);
 
@@ -267,11 +267,12 @@ decode_preR13_section_chk(Dwg_Section_Type_r11 id, Bit_Chain* dat,
 }
 
 // TABLES really
-static void
+static int
 decode_preR13_section(Dwg_Section_Type_r11 id, Bit_Chain* dat, Dwg_Data * dwg)
 {
   Dwg_Section *tbl = &dwg->header.section[id];
   int i; long vcount;
+  int error = 0;
   long unsigned int num = dwg->num_objects;
   long unsigned int old_size = num * sizeof(Dwg_Object);
   long unsigned int size = tbl->number * sizeof(Dwg_Object);
@@ -541,6 +542,7 @@ decode_preR13_section(Dwg_Section_Type_r11 id, Bit_Chain* dat, Dwg_Data * dwg)
     }
   dwg->num_objects += tbl->number;
   dat->byte = tbl->address + (tbl->number * tbl->size);
+  return error;
 }
 
 static int
@@ -1377,24 +1379,26 @@ read_two_byte_offset(Bit_Chain *restrict dat, int *restrict lit_length)
  */
 static int
 decompress_R2004_section(Bit_Chain *restrict dat, char *restrict decomp,
-                         uint32_t comp_data_size)
+                         uint32_t decomp_data_size, uint32_t comp_data_size)
 {
   int lit_length, i;
-  int comp_offset, comp_bytes;
+  uint32_t comp_offset, comp_bytes, bytes_left;
   unsigned char opcode1 = 0, opcode2;
   long unsigned int start_byte = dat->byte;
   char *src, *dst = decomp;
 
-  if (comp_data_size > dat->size - start_byte) // bytes left to read
+  bytes_left = decomp_data_size; //to write to
+  if (comp_data_size > dat->size - start_byte) // bytes left to read from
     {
-      LOG_ERROR("Invalid comp_data_size %lu > %lu bytes left",
-                (unsigned long)comp_data_size, dat->size - dat->byte)
+      LOG_WARN("Invalid comp_data_size %lu > %lu bytes left",
+                (unsigned long)bytes_left, dat->size - dat->byte)
       return DWG_ERR_VALUEOUTOFBOUNDS;
     }
   // length of the first sequence of uncompressed or literal data.
   lit_length = read_literal_length(dat, &opcode1);
   bit_read_fixed(dat, decomp, lit_length);
   dst += lit_length;
+  bytes_left -= lit_length;
 
   opcode1 = 0x00;
   while (dat->byte - start_byte < comp_data_size)
@@ -1459,17 +1463,34 @@ decompress_R2004_section(Bit_Chain *restrict dat, char *restrict decomp,
       else if (opcode1 == 0x11)
           break;     // Terminates the input stream, everything is ok
       else
+        {
+          LOG_ERROR("Invalid opcode 0x%x in input stream at pos %lu",
+                    opcode1, dat->byte);
           return DWG_ERR_INTERNALERROR;  // error in input stream
+        }
 
-      LOG_INSANE("got compressed data %d\n", comp_bytes)
+      LOG_INSANE("<C %d\n", comp_bytes)
       // copy "compressed data"
       src = dst - comp_offset - 1;
       assert(src >= decomp);
+      if (comp_bytes > bytes_left) // bytes left to write
+        {
+          LOG_ERROR("Invalid comp_bytes %lu > %lu bytes left",
+                    (unsigned long)comp_bytes, bytes_left)
+          return DWG_ERR_VALUEOUTOFBOUNDS;
+        }
       for (i = 0; i < comp_bytes; ++i)
         *dst++ = *src++;
+      bytes_left -= comp_bytes;
 
       // copy "literal data"
-      LOG_INSANE("got literal data %d\n", lit_length)
+      LOG_INSANE("<L %d\n", lit_length)
+      if (lit_length > bytes_left) // bytes left to write
+        {
+          LOG_ERROR("Invalid lit_length %lu > %lu bytes left",
+                    (unsigned long)lit_length, (unsigned long)bytes_left)
+          return DWG_ERR_VALUEOUTOFBOUNDS;
+        }
       for (i = 0; i < lit_length; ++i)
         *dst++ = bit_read_RC(dat);
     }
@@ -1495,14 +1516,14 @@ read_R2004_section_map(Bit_Chain* dat, Dwg_Data * dwg)
   dwg->header.section = 0;
 
   // decompressed data
-  decomp = (char *)calloc(decomp_data_size, sizeof(char));
+  decomp = (char *)calloc(decomp_data_size+1024, sizeof(char));
   if (!decomp)
     {
       LOG_ERROR("Out of memory");
       return DWG_ERR_OUTOFMEM;
     }
 
-  error = decompress_R2004_section(dat, decomp, comp_data_size);
+  error = decompress_R2004_section(dat, decomp, decomp_data_size+1024, comp_data_size);
   if (error > DWG_ERR_CRITICAL)
     return error;
   LOG_TRACE("\n#### Read 2004 Section Page Map ####\n")
@@ -1559,6 +1580,7 @@ read_R2004_section_map(Bit_Chain* dat, Dwg_Data * dwg)
   return 0;
 }
 
+// index is the Section Number in the section map
 static Dwg_Section*
 find_section(Dwg_Data *dwg, unsigned long int index)
 {
@@ -1582,19 +1604,19 @@ read_R2004_section_info(Bit_Chain* dat, Dwg_Data *dwg,
 {
   char *decomp, *ptr;
   unsigned int i, j;
-  uint32_t section_number;
+  uint32_t section_number = 0;
   uint32_t data_size;
   uint64_t start_offset;
   int error;
 
-  decomp = (char *)calloc(decomp_data_size, 1);
+  decomp = (char *)calloc(decomp_data_size+1024, 1);
   if (!decomp)
     {
       LOG_ERROR("Out of memory");
       return DWG_ERR_OUTOFMEM;
     }
 
-  error = decompress_R2004_section(dat, decomp, comp_data_size);
+  error = decompress_R2004_section(dat, decomp, decomp_data_size+1024, comp_data_size);
   if (error > DWG_ERR_CRITICAL)
     return error;
 
@@ -1622,6 +1644,15 @@ read_R2004_section_info(Bit_Chain* dat, Dwg_Data *dwg,
       info->size            = *((int32_t*)ptr);
       info->pagecount 	    = *((int32_t*)ptr + 1);
       info->num_sections    = *((int32_t*)ptr + 2);
+      if (info->size == section_number+1 &&
+          info->num_sections > 100000)
+        {
+	  LOG_WARN("Oops, Section[%d] => Section_Info %d", i, info->size);
+          data_size = info->pagecount;
+          section_number++;
+          info = &dwg->header.section_info[i-1];
+          goto next_section;
+        }
       info->max_decomp_size = *((int32_t*)ptr + 3);
       info->unknown2        = *((int32_t*)ptr + 4);
       info->compressed      = *((int32_t*)ptr + 5);
@@ -1631,7 +1662,7 @@ read_R2004_section_info(Bit_Chain* dat, Dwg_Data *dwg,
       memcpy(info->name, ptr, 64);
       ptr += 64;
 
-      LOG_TRACE("\nSection Info description fields\n")
+      LOG_TRACE("\nSection Info[%d] description fields\n", i)
       LOG_TRACE("Size:            %u\n", info->size)
       LOG_TRACE("PageCount:       %u\n", info->pagecount)
       LOG_TRACE("Num sections:    %u\n", info->num_sections)
@@ -1639,11 +1670,11 @@ read_R2004_section_info(Bit_Chain* dat, Dwg_Data *dwg,
                 info->max_decomp_size, info->max_decomp_size)
       LOG_TRACE("Unknown:         %u\n", info->unknown2)
       LOG_TRACE("Compressed:      %u (1=no, 2=yes)\n", info->compressed)
-      LOG_TRACE("Section Type:    %d\n", info->type)
+      LOG_TRACE("Section Type:  0x%x\n", (unsigned)info->type)
       LOG_TRACE("Encrypted:       %d (0=no, 1=yes, 2=unknown)\n", info->encrypted)
       LOG_TRACE("SectionName:     %s\n\n", info->name)
 
-      if (info->num_sections < 10000)
+      if (info->num_sections < 100000)
 	{
 	  LOG_INFO("Section count %u in area %d\n", info->num_sections, i);
           info->sections = calloc(info->num_sections, sizeof(Dwg_Section*));
@@ -1655,7 +1686,7 @@ read_R2004_section_info(Bit_Chain* dat, Dwg_Data *dwg,
 
 	  for (j = 0; j < info->num_sections; j++)
 	    {
-	      section_number = *((uint32_t*)ptr);      // Index into SectionMap
+	      section_number = *((uint32_t*)ptr);       // Index into SectionMap
 	      data_size      = *((uint32_t*)ptr + 1);
 	      //start_offset   = *((uint64_t*)ptr + 1); // avoid alignment ubsan
 	      start_offset   = *((uint32_t*)ptr + 2);
@@ -1665,11 +1696,43 @@ read_R2004_section_info(Bit_Chain* dat, Dwg_Data *dwg,
 
 	      info->sections[j] = find_section(dwg, section_number);
 
-	      LOG_TRACE("Section Number: %d\n", section_number)
+              if (section_number > info->num_sections + info->sections[0]->number)
+                {
+                  LOG_TRACE("Strange Section Number: 0x%x\n", (unsigned long)section_number)
+                }
+              else
+                {
+                  LOG_TRACE("Section Number: %lu\n", (unsigned long)section_number)
+                }
               LOG_TRACE("Data size:      %d\n", data_size) //compressed
 	      LOG_TRACE("Start offset:   0x%" PRIx64 "\n", start_offset)
 	    }
 	}// sanity check
+      else if (info->size == section_number+1)
+        {
+          Dwg_Section* sec;
+          // oops, this is really another info
+	  LOG_WARN("Oops2, Section[%d] => Section_Info %d", i, info->size);
+          section_number = info->size;      // Index into SectionMap
+          data_size      = info->pagecount;
+        next_section:
+          start_offset   = *((uint32_t*)ptr + 2);
+          start_offset <<= 32;
+          start_offset  += *((uint32_t*)ptr + 3);
+          ptr -= 32;
+          ptr -= 64;
+          ptr += 16;
+
+          sec = find_section(dwg, section_number);
+          if (section_number < dwg->header.num_infos)
+            info->sections[section_number] = sec;
+
+          LOG_TRACE("Section Number: %d\n", section_number)
+          LOG_TRACE("Data size:      %d\n", data_size) //compressed
+          LOG_TRACE("Start offset:   0x%" PRIx64 "\n", start_offset);
+          free (decomp);
+          return error | DWG_ERR_VALUEOUTOFBOUNDS;
+        }
       else
 	{
 	  LOG_ERROR("Section count %u in area %d too high! Skipping",
@@ -1706,8 +1769,8 @@ static int
 read_2004_compressed_section(Bit_Chain* dat, Dwg_Data *dwg,
                             Bit_Chain* sec_dat, BITCODE_RL section_type)
 {
-  long unsigned int address, sec_mask;
-  long unsigned int max_decomp_size;
+  uint32_t address, sec_mask;
+  uint32_t max_decomp_size;
   Dwg_Section_Info *info = NULL;
   encrypted_section_header es;
   char *decomp;
@@ -1724,13 +1787,13 @@ read_2004_compressed_section(Bit_Chain* dat, Dwg_Data *dwg,
     }
   if (!info)
     {
-      LOG_WARN("Failed to find section %d", (int)section_type);
-      return DWG_ERR_INTERNALERROR;
+      LOG_WARN("Failed to find section_info with type 0x%x", section_type);
+      return DWG_ERR_SECTIONNOTFOUND;
     }
   else
     {
-      LOG_TRACE("\nFound section %s %d with %d sections\n",
-                info->name, (int)section_type, info->num_sections);
+      LOG_TRACE("\nFound section_info %s type 0x%x with %d sections\n",
+                info->name, section_type, info->num_sections);
     }
 
   max_decomp_size = info->num_sections * info->max_decomp_size;
@@ -1775,8 +1838,10 @@ read_2004_compressed_section(Bit_Chain* dat, Dwg_Data *dwg,
       LOG_HANDLE("Checksum2:        0x%x\n\n",
             (unsigned int) es.fields.checksum_2)
 
-      error = decompress_R2004_section(dat, &decomp[i * info->max_decomp_size],
-                                       es.fields.data_size);
+      error = decompress_R2004_section
+        (dat, &decomp[i * info->max_decomp_size], //offset
+         max_decomp_size - (i*info->max_decomp_size), //bytes left
+         es.fields.data_size);
       if (error > DWG_ERR_CRITICAL)
         return error;
     }
@@ -2146,6 +2211,8 @@ decode_R2004(Bit_Chain* dat, Dwg_Data * dwg)
       error |= read_R2004_section_info(dat, dwg,
                  _obj->comp_data_size, _obj->decomp_data_size);
     }
+  else
+    error |= DWG_ERR_SECTIONNOTFOUND;
 
   error |= read_2004_section_classes(dat, dwg);
   error |= read_2004_section_header(dat, dwg);
@@ -2222,15 +2289,11 @@ dwg_decode_eed(Bit_Chain * dat, Dwg_Object_Object * obj)
       Dwg_Object *_obj = &dwg->object[obj->objid];
 
       LOG_TRACE("EED[%u] size: " FORMAT_BS "\n", idx, size);
-      if (size > 1024)
+      if (size > _obj->size)
         {
-          LOG_ERROR("dwg_decode_eed: Absurd extended object data size: %lu ignored."
-                    " Object: %lu (handle)",
-                    (long unsigned int) size, _obj->handle.value)
-          _obj->bitsize = 0;
+          LOG_ERROR("Invalid EED size " FORMAT_BS " > %u", size, _obj->size)
           obj->num_eed = 0;
-          obj->num_reactors = 0;
-          return DWG_ERR_VALUEOUTOFBOUNDS; //XXX
+          return DWG_ERR_INVALIDEED; /* may continue */
         }
 
       if (idx) {
@@ -2299,13 +2362,18 @@ dwg_decode_eed(Bit_Chain * dat, Dwg_Object_Object * obj)
                 if (lenc > size-4)
                   {
                     LOG_ERROR("Invalid EED string len %d, max %d", lenc, size-4);
+                    dat->byte = end;
+                    break;
+#if 0
+
                     obj->num_eed = 0;
                     if (obj->eed[idx].size)
                       free(obj->eed[idx].raw);
                     free(obj->eed[idx].data);
                     free(obj->eed);
                     dat->byte = end;
-                    return DWG_ERR_VALUEOUTOFBOUNDS;
+                    return DWG_ERR_VALUEOUTOFBOUNDS; /* may not continue */
+#endif
                   }
                 /* code:1 + len:1 + cp:2 */
                 bit_read_fixed(dat, obj->eed[idx].data->u.eed_0.string, lenc);
@@ -2343,7 +2411,7 @@ dwg_decode_eed(Bit_Chain * dat, Dwg_Object_Object * obj)
                 obj->eed[idx].data->u.eed_4.data[j] = bit_read_RC(dat);
               LOG_TRACE("EED[%u] raw: %s\n", idx, obj->eed[idx].data->u.eed_4.data);
               break;
-            case 10: case 11: case 12: case 13:
+            case 10: case 11: case 12: case 13: /*case 14: case 15:*/
               obj->eed[idx].data->u.eed_10.point.x = bit_read_RD(dat);
               obj->eed[idx].data->u.eed_10.point.y = bit_read_RD(dat);
               obj->eed[idx].data->u.eed_10.point.z = bit_read_RD(dat);
@@ -2352,21 +2420,26 @@ dwg_decode_eed(Bit_Chain * dat, Dwg_Object_Object * obj)
                         obj->eed[idx].data->u.eed_10.point.y,
                         obj->eed[idx].data->u.eed_10.point.z);
               break;
-            case 40: case 41: case 42:
+            case 40: case 41: case 42: /*case 43: case 44: case 45: case 46:
+            case 51: case 54:*/
               obj->eed[idx].data->u.eed_40.real = bit_read_RD(dat);
-              LOG_TRACE("EED[%u] real: %f\n", idx, obj->eed[idx].data->u.eed_40.real);
+              LOG_TRACE("EED[%u] real: %f\n", idx,
+                        obj->eed[idx].data->u.eed_40.real);
               break;
             case 70:
               obj->eed[idx].data->u.eed_70.rs = bit_read_RS(dat);
-              LOG_TRACE("EED[%u] short: " FORMAT_RS "\n", idx, obj->eed[idx].data->u.eed_70.rs);
+              LOG_TRACE("EED[%u] short: " FORMAT_RS "\n", idx,
+                        obj->eed[idx].data->u.eed_70.rs);
               break;
             case 71:
               obj->eed[idx].data->u.eed_71.rl = bit_read_RL(dat);
-              LOG_TRACE("EED[%u] long: " FORMAT_RL "\n", idx, obj->eed[idx].data->u.eed_71.rl);
+              LOG_TRACE("EED[%u] long: " FORMAT_RL "\n", idx,
+                        obj->eed[idx].data->u.eed_71.rl);
               break;
             default:
               LOG_ERROR("Unknown EED code %d", code);
-              return DWG_ERR_INVALIDTYPE;
+              dat->byte = end;
+              return DWG_ERR_INVALIDTYPE; /* may continue */
             }
 #ifdef DEBUG
           // sanity checks
@@ -2469,7 +2542,7 @@ dwg_decode_entity(Bit_Chain* dat, Bit_Chain* hdl_dat, Bit_Chain* str_dat,
   }
 
   error |= dwg_decode_eed(dat, (Dwg_Object_Object *)ent);
-  if (error & (DWG_ERR_INVALIDTYPE|DWG_ERR_VALUEOUTOFBOUNDS))
+  if (error & (DWG_ERR_VALUEOUTOFBOUNDS))
     return error;
 
   #include "common_entity_data.spec"
@@ -2481,7 +2554,7 @@ dwg_decode_entity(Bit_Chain* dat, Bit_Chain* hdl_dat, Bit_Chain* str_dat,
 
 /* The first common part of every object.
 
-   There is no COMMON_ENTITY_HANDLE_DATA for objects.
+   There is no COMMON_ENTITY_DATA for objects.
    Check page 269, par 28 (Extended Object Data)
  */
 static int
@@ -2501,7 +2574,7 @@ dwg_decode_object(Bit_Chain* dat, Bit_Chain* hdl_dat, Bit_Chain* str_dat,
   VERSIONS(R_2000, R_2007)
     {
       obj->bitsize = bit_read_RL(dat);
-      LOG_TRACE("bitsize: " FORMAT_RL " ", obj->bitsize);
+      LOG_TRACE("bitsize: " FORMAT_RL "\n", obj->bitsize);
     }
   SINCE(R_2007)
     {
@@ -3011,7 +3084,7 @@ dwg_decode_xdata(Bit_Chain *restrict dat, Dwg_Object_XRECORD *restrict obj, int 
  * Private functions which depend on the preceding
  */
 
-static void
+static int
 decode_preR13_entities(unsigned long start, unsigned long end,
                        unsigned long offset,
                        Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
@@ -3034,7 +3107,7 @@ decode_preR13_entities(unsigned long start, unsigned long end,
       if (!dwg->object)
         {
           LOG_ERROR("Out of memory");
-          return;
+          return DWG_ERR_OUTOFMEM;
         }
       obj = &dwg->object[num];
       memset(obj, 0, sizeof(Dwg_Object));
@@ -3125,7 +3198,7 @@ decode_preR13_entities(unsigned long start, unsigned long end,
     }
 
   dat->byte = end;
-  return;
+  return error;
 }
 
 /** dwg_decode_variable_type

@@ -261,7 +261,7 @@ DWG_ENTITY(ATTDEF)
       FIELD_T (default_value, 1);
       FIELD_BS (generation, 71);
       FIELD_BS (horiz_alignment, 72);
-      FIELD_BS (vert_alignment, 73);
+      FIELD_BS (vert_alignment, 74);
     }
 
   SINCE(R_2000)
@@ -306,7 +306,7 @@ DWG_ENTITY(ATTDEF)
 
   SUBCLASS (AcDbAttributeDefinition)
   FIELD_T (tag, 2);
-  FIELD_BS (field_length, 73);
+  FIELD_BS (field_length, 73); //unused
   FIELD_RC (flags, 70); // 1 invisible, 2 constant, 4 verify, 8 preset
 
   SINCE(R_2007) {
@@ -584,8 +584,8 @@ DWG_ENTITY(MINSERT)
         FIELD_BL (num_owned, 0);
     }
 
-  FIELD_BS (numcols, 70);
-  FIELD_BS (numrows, 71);
+  FIELD_BS (num_cols, 70);
+  FIELD_BS (num_rows, 71);
   FIELD_BD (col_spacing, 44);
   FIELD_BD (row_spacing, 45);
 
@@ -966,9 +966,9 @@ DWG_ENTITY_END
     FIELD_3BD (extrusion, 210); \
     FIELD_2RD (text_midpt, 11); \
     FIELD_BD (elevation, 31); \
-    FIELD_RC (flags_1, 70); \
+    FIELD_RC (flag1, 70); \
     FIELD_T (user_text, 1); \
-    FIELD_BD (text_rot, 53); \
+    FIELD_BD (text_rotation, 53); \
     FIELD_BD (horiz_dir, 51); \
     FIELD_3BD_1 (ins_scale, 41); \
     FIELD_BD (ins_rotation, 54); \
@@ -997,7 +997,7 @@ DWG_ENTITY(DIMENSION_ORDINATE)
   FIELD_3BD (ucsorigin_pt, 10);
   FIELD_3BD (feature_location_pt, 13);
   FIELD_3BD (leader_endpt, 14);
-  FIELD_RC (flags_2, 70);
+  FIELD_RC (flag2, 70);
 
   COMMON_ENTITY_HANDLE_DATA;
   UNTIL(R_2007)
@@ -1018,8 +1018,8 @@ DWG_ENTITY(DIMENSION_LINEAR)
   FIELD_3BD (_13_pt, 13);
   FIELD_3BD (_14_pt, 14);
   FIELD_3BD (def_pt, 10);
-  FIELD_BD (ext_line_rot, 52);
-  FIELD_BD (dim_rot, 50);
+  FIELD_BD (ext_line_rotation, 52);
+  FIELD_BD (dim_rotation, 50);
   SUBCLASS (AcDbRotatedDimension)
 
   COMMON_ENTITY_HANDLE_DATA;
@@ -1040,7 +1040,7 @@ DWG_ENTITY(DIMENSION_ALIGNED)
   FIELD_3BD (_13_pt, 13);
   FIELD_3BD (_14_pt, 14);
   FIELD_3BD (def_pt, 10);
-  FIELD_BD (ext_line_rot, 52);
+  FIELD_BD (ext_line_rotation, 52);
 
   COMMON_ENTITY_HANDLE_DATA;
   UNTIL(R_2007)
@@ -1610,6 +1610,7 @@ static int decode_3dsolid(Bit_Chain* dat, Bit_Chain* hdl_dat,
        */
       else //if (FIELD_VALUE(version)==2)
         {
+#ifndef IS_RELEASE
           //TODO
           do
             {
@@ -1619,6 +1620,10 @@ static int decode_3dsolid(Bit_Chain* dat, Bit_Chain* hdl_dat,
                 realloc(FIELD_VALUE(block_size), (i+1) * sizeof (BITCODE_BL));
 
               FIELD_BL (block_size[i], 0);
+              if (_obj->block_size[i] > 10000) {
+                LOG_ERROR("Invalid ACIS 2 block_size[%d] %d", i, _obj->block_size[i]);
+                return DWG_ERR_NOTYETSUPPORTED;
+              }
               FIELD_TF (encr_sat_data[i], FIELD_VALUE(block_size[i]), 1);
               if (FIELD_VALUE(block_size[i])) {
                 total_size += FIELD_VALUE (block_size[i]);
@@ -1626,6 +1631,7 @@ static int decode_3dsolid(Bit_Chain* dat, Bit_Chain* hdl_dat,
             } while(FIELD_VALUE (block_size[i++]));
           num_blocks = i-1;
           FIELD_VALUE(num_blocks) = num_blocks;
+#endif
           LOG_ERROR("TODO: Implement parsing of SAT file (version 2) "
                     "in 3DSOLID entity.");
         }
@@ -3369,11 +3375,17 @@ DWG_ENTITY(HATCH)
       FIELD_BL (single_color_gradient, 452);
       FIELD_BD (gradient_tint, 462);
       FIELD_BL (num_colors, 453); //default: 2
+      if (FIELD_VALUE(is_gradient_fill) && FIELD_VALUE(num_colors > 1000))
+        {
+          LOG_ERROR("Invalid gradient fill HATCH.num_colors " FORMAT_BL,
+                    _obj->num_colors);
+          return DWG_ERR_VALUEOUTOFBOUNDS;
+        }
       REPEAT(num_colors, colors, Dwg_HATCH_Color)
         {
           FIELD_BD (colors[rcount1].unknown_double, 463); //value
           FIELD_BS (colors[rcount1].unknown_short, 0);
-          FIELD_BL (colors[rcount1].rgb_color, 63); // 63 for color as ACI. 421 for rgb
+          FIELD_BLh (colors[rcount1].rgb_color, 63); // 63 for color as ACI. 421 for rgb
           FIELD_RC (colors[rcount1].ignored_color_byte, 0);
         }
       SET_PARENT_OBJ(colors)
@@ -3387,12 +3399,23 @@ DWG_ENTITY(HATCH)
   FIELD_B (solid_fill, 70); //default: 1, pattern_fill: 0
   FIELD_B (associative, 71);
   FIELD_BL (num_paths, 91);
+  if (FIELD_VALUE(num_paths > 10000))
+    {
+      LOG_ERROR("Invalid HATCH.num_paths %lu", _obj->num_paths);
+      return DWG_ERR_VALUEOUTOFBOUNDS;
+    }
   REPEAT(num_paths, paths, Dwg_HATCH_Path)
     {
       FIELD_BL (paths[rcount1].flag, 92);
       if (!(FIELD_VALUE(paths[rcount1].flag) & 2))
         {
           FIELD_BL (paths[rcount1].num_segs_or_paths, 93);
+          if (FIELD_VALUE(paths[rcount1].num_segs_or_paths > 10000))
+            {
+              LOG_ERROR("Invalid HATCH.num_segs_or_paths %lu",
+                        _obj->paths[rcount1].num_segs_or_paths);
+              return DWG_ERR_VALUEOUTOFBOUNDS;
+            }
           REPEAT2(paths[rcount1].num_segs_or_paths, paths[rcount1].segs,
                   Dwg_HATCH_PathSeg)
             {
@@ -4025,7 +4048,7 @@ DWG_OBJECT(FIELD)
   FIELD_T (evaluation_error_msg, 300);
   Table_Value(value)
   FIELD_T (value_string, 301); // and 9 for subsequent >255 chunks
-  FIELD_T (value_string_length, 98);
+  FIELD_BL (value_string_length, 98); //ODA bug TV
 
   FIELD_BL (num_childval, 93);
   REPEAT_N((long)FIELD_VALUE(num_childval), childval, Dwg_FIELD_ChildValue)
@@ -4214,7 +4237,7 @@ DWG_OBJECT_END
       FIELD_T (fmt.value_format_string, 300); \
       FIELD_BD (fmt.rotation, 40); \
       FIELD_BD (fmt.block_scale, 140); \
-      FIELD_BL (fmt.cell_align, 94); \
+      FIELD_BL (fmt.cell_alignment, 94); \
       FIELD_CMC (fmt.content_color, 62); \
       FIELD_HANDLE (fmt.text_style, 3, 92); \
       FIELD_BD (fmt.text_height, 92)
@@ -4659,11 +4682,11 @@ DWG_ENTITY(TABLE)
       if (table_flag & 0x2000)
         FIELD_CMC (data_row_fill_color, 63);
       if (table_flag & 0x4000)
-        FIELD_BS (title_row_align, 170);
+        FIELD_BS (title_row_alignment, 170);
       if (table_flag & 0x8000)
-        FIELD_BS (header_row_align, 170);
+        FIELD_BS (header_row_alignment, 170);
       if (table_flag & 0x10000)
-        FIELD_BS (data_row_align, 170);
+        FIELD_BS (data_row_alignment, 170);
       if (table_flag & 0x20000)
         FIELD_HANDLE (title_text_style, 5, 7);
       if (table_flag & 0x40000)
@@ -5097,7 +5120,7 @@ DWG_ENTITY(MULTILEADER)
   FIELD_BD (ctx.landing_gap, 145);
   FIELD_BS (ctx.text_left, 174);
   FIELD_BS (ctx.text_right, 175);
-  FIELD_BS (ctx.text_align, 176);
+  FIELD_BS (ctx.text_alignment, 176);
   FIELD_BS (ctx.attach_type, 177);
 
   FIELD_B (ctx.has_text_content, 290);
@@ -5114,7 +5137,7 @@ DWG_ENTITY(MULTILEADER)
       FIELD_BD (ctx.txt.line_spacing_factor, 45);
       FIELD_BS (ctx.txt.line_spacing_style, 170);
       FIELD_CMC (ctx.txt.color, 90);
-      FIELD_BS (ctx.txt.align, 171);
+      FIELD_BS (ctx.txt.alignment, 171);
       FIELD_BS (ctx.txt.flow, 172);
       FIELD_CMC (ctx.txt.bg_color, 91);
       FIELD_BD (ctx.txt.bg_scale, 141);
@@ -5205,7 +5228,7 @@ DWG_ENTITY(MULTILEADER)
       SET_PARENT_OBJ(blocklabels)
       END_REPEAT(blocklabels);
       FIELD_B (neg_textdir, 294);
-      FIELD_BS (ipe_align, 178);
+      FIELD_BS (ipe_alignment, 178);
       FIELD_BS (justification, 179);
       FIELD_BD (scale_factor, 45);
     }

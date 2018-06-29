@@ -9,7 +9,7 @@ dnl You should have received a copy of the GNU General Public License
 dnl along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 AC_PREREQ([2.61])
-AC_INIT([LibreDWG],[0.4.900],[libredwg@gnu.org],,
+AC_INIT([LibreDWG],[0.4.924],[libredwg@gnu.org],,
         [https://savannah.gnu.org/projects/libredwg/])
 AC_CONFIG_AUX_DIR([build-aux])
 dnl for older systems use this:
@@ -42,8 +42,6 @@ dnl Checks for libraries
 AC_CHECK_LIB([ps],[PS_open_file],
   libredwg_have_libps=yes,
   libredwg_have_libps=no)
-AM_CONDITIONAL([HAVE_LIBPS],[test yes = "$libredwg_have_libps" &&
-                             test yes = "$ac_cv_header_libps_pslib_h"])
 
 dnl `pcre2-config --libs8`
 AC_CHECK_LIB([pcre2-8],[pcre2_config_8],
@@ -91,6 +89,9 @@ AM_CONDITIONAL([HAVE_DEJAGNU], [test x$ac_cv_header_dejagnu_h = xyes])
 if test yes = "$libredwg_have_libps" ; then
   AC_CHECK_HEADERS([libps/pslib.h])
 fi
+AM_CONDITIONAL([HAVE_LIBPS],[test "x$libredwg_have_libps" = xyes &&
+                             test "x$ac_cv_header_libps_pslib_h" = xyes])
+
 if test yes = "$libredwg_have_libpcre2"; then
   AC_CHECK_HEADERS([pcre2.h],[],[],[#define PCRE2_CODE_UNIT_WIDTH 8])
 else
@@ -288,6 +289,8 @@ else
 fi
 AM_CONDITIONAL([HAVE_SWIG_PYTHON],
   [test -n "$SWIG" && test -n "$PYTHON_VERSION"])
+AM_CONDITIONAL([HAVE_PYTHON],
+  [test x$enable_python != xno])
 AM_CONDITIONAL([HAVE_SWIG_PERL],
   [test -n "$SWIG" && test -n "$PERL"])
 AM_CONDITIONAL([HAVE_PERL],
